@@ -1,34 +1,48 @@
-from flask import Flask, request, jsonify
-from werkzeug.exceptions import HTTPException
-import ipinfaux
+from flask import Flask, Response, jsonify, request
+import requests
+
+
+SKIPPED_REQUEST_HEADERS = {"host", "user-agent", "content-length", "connection"}
+SKIPPED_RESPONSE_HEADERS = {"content-encoding", "content-length", "transfer-encoding", "connection"}
+ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+
 
 def create_app():
     app = Flask(__name__)
 
-    @app.errorhandler(HTTPException)
-    def handle_error(error):
-        return jsonify({
-            "success": False,
-            "error": {
-                "code": error.code,
-                "message": error.description
-            }
-        }), error.code
-    
-    @app.route("/api/", methods=["GET"])
-    def api():
-        return jsonify({"success": True})
+    @app.route("/", methods=ALLOWED_METHODS)
+    def proxy():
+        url = request.args.get("url", "")
+        if not url.startswith(("http://", "https://")):
+            return jsonify(error="Provide a valid http(s) url query parameter"), 400
 
-    @app.route("/api/ip/<string:ip>", methods=["GET"])
-    def get_ip(ip):
-        jwtToken = ipinfaux.GetJWTByLogin.get_fresh_token()
-        data = ipinfaux.GetFullData(ip, jwtToken).as_dict()
+        headers = {
+            key: value
+            for key, value in request.headers
+            if key.lower() not in SKIPPED_REQUEST_HEADERS
+        }
+        headers["User-Agent"] = "gzip"
 
-        return jsonify({
-            "success": True,
-            "data": data
-        })
+        try:
+            upstream = requests.request(
+                method=request.method,
+                url=url,
+                headers=headers,
+                data=request.get_data(),
+                allow_redirects=False,
+                timeout=30,
+            )
+        except requests.RequestException as error:
+            return jsonify(error=str(error)), 502
+
+        response_headers = [
+            (key, value)
+            for key, value in upstream.headers.items()
+            if key.lower() not in SKIPPED_RESPONSE_HEADERS
+        ]
+        return Response(upstream.content, upstream.status_code, response_headers)
 
     return app
 
 app = create_app()
+
