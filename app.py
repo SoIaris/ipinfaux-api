@@ -26,7 +26,7 @@ def create_app():
         try:
             upstream = requests.request(
                 method=request.method,
-                url=url,
+                url=f"https://corsproxy.io/?key=e89bea77&url={url}",
                 headers=headers,
                 data=request.get_data(),
                 allow_redirects=False,
